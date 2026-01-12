@@ -545,7 +545,7 @@ export async function POST(request: NextRequest) {
 
           try {
             console.log("Generating image for:", prompt);
-            const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+            const baseUrl = new URL(request.url).origin;
             const imageResponse = await fetch(`${baseUrl}/api/canvas/generate-image`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -615,7 +615,7 @@ export async function POST(request: NextRequest) {
             });
 
             try {
-              const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+              const baseUrl = new URL(request.url).origin;
               const imageResponse = await fetch(`${baseUrl}/api/canvas/generate-image`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
