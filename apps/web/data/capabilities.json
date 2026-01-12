@@ -1,0 +1,36 @@
+{
+  "capabilities": [
+    {
+      "id": "cap-1768224172261",
+      "name": "pixelatedMeawBubble",
+      "description": "Creates a pixelated game-like MEAW speech bubble when clicked",
+      "handler": "{\"trigger\":\"click\",\"code\":\"// Create pixelated MEAW bubble\\nconst bubble = {\\n  id: 'meaw-bubble-' + Date.now(),\\n  type: 'text',\\n  content: 'MEAW!',\\n  position: {\\n    x: element.position.x + 15,\\n    y: element.position.y - 15\\n  },\\n  size: 24,\\n  color: '#ffffff',\\n  customProps: {\\n    backgroundColor: '#000000',\\n    border: '3px solid #ffffff',\\n    borderRadius: '0px',\\n    padding: '8px 12px',\\n    fontFamily: 'monospace',\\n    fontWeight: 'bold',\\n    textShadow: '2px 2px 0px #666666',\\n    boxShadow: '4px 4px 0px #333333',\\n    pixelated: true\\n  },\\n  animation: 'bounce',\\n  draggable: false\\n};\\n\\nsetElements(prev => [...prev, bubble]);\\n\\n// Auto-remove after 2 seconds\\nsetTimeout(() => {\\n  setElements(prev => prev.filter(el => el.id !== bubble.id));\\n}, 2000);\"}",
+      "createdAt": "2026-01-12T13:22:52.261Z",
+      "usageCount": 0
+    },
+    {
+      "id": "cap-1768224839902",
+      "name": "clickMeawBubble",
+      "description": "Shows a MEAW speech bubble above the element when clicked",
+      "handler": "{\"trigger\":\"click\",\"code\":\"// Create MEAW bubble above the clicked element\\nconst bubbleId = 'meaw-bubble-' + Date.now();\\nconst newBubble = {\\n  id: bubbleId,\\n  type: 'text',\\n  content: 'MEAW!',\\n  position: {\\n    x: element.position.x,\\n    y: Math.max(5, element.position.y - 15) // Above the element, but not off screen\\n  },\\n  size: 24,\\n  color: '#ff69b4',\\n  draggable: false,\\n  customProps: {\\n    backgroundColor: 'white',\\n    border: '2px solid #ff69b4',\\n    borderRadius: '15px',\\n    padding: '8px 12px',\\n    fontWeight: 'bold',\\n    boxShadow: '0 2px 8px rgba(0,0,0,0.2)'\\n  }\\n};\\n\\nsetElements(prev => [...prev, newBubble]);\\n\\n// Auto-remove the bubble after 2 seconds\\nsetTimeout(() => {\\n  setElements(prev => prev.filter(el => el.id !== bubbleId));\\n}, 2000);\"}",
+      "createdAt": "2026-01-12T13:33:59.902Z",
+      "usageCount": 0
+    },
+    {
+      "id": "cap-1768225052434",
+      "name": "connectSpotify",
+      "description": "Connects to Spotify and shows currently playing track when clicked",
+      "handler": "{\"trigger\":\"click\",\"code\":\"// Check if Spotify Web Playback SDK is available\\nif (!window.Spotify) {\\n  // Load Spotify Web Playback SDK\\n  const script = document.createElement('script');\\n  script.src = 'https://sdk.scdn.co/spotify-player.js';\\n  document.head.appendChild(script);\\n  \\n  // Show connection prompt\\n  setElements(prev => [...prev, {\\n    id: 'spotify-prompt-' + Date.now(),\\n    type: 'text',\\n    content: '🎵 Click to connect Spotify!',\\n    position: { x: element.position.x, y: element.position.y - 10 },\\n    size: 20,\\n    color: '#1DB954',\\n    animation: 'pulse'\\n  }]);\\n  \\n  // Auto-remove prompt after 3 seconds\\n  setTimeout(() => {\\n    setElements(prev => prev.filter(el => !el.id.startsWith('spotify-prompt-')));\\n  }, 3000);\\n  \\n  return;\\n}\\n\\n// If SDK loaded, attempt to get current track\\nfetch('https://api.spotify.com/v1/me/player/currently-playing', {\\n  headers: {\\n    'Authorization': 'Bearer ' + localStorage.getItem('spotify_token')\\n  }\\n})\\n.then(response => {\\n  if (response.status === 401) {\\n    // Need to authenticate\\n    const clientId = 'your_client_id'; // Would need real Spotify app\\n    const redirectUri = window.location.origin;\\n    const scopes = 'user-read-currently-playing user-read-playback-state';\\n    const authUrl = `https://accounts.spotify.com/authorize?client_id=${clientId}&response_type=token&redirect_uri=${redirectUri}&scope=${scopes}`;\\n    \\n    // Show auth message\\n    setElements(prev => [...prev, {\\n      id: 'spotify-auth-' + Date.now(),\\n      type: 'text',\\n      content: '🔐 Spotify login needed - check console for auth link',\\n      position: { x: element.position.x, y: element.position.y - 15 },\\n      size: 16,\\n      color: '#FF6B6B'\\n    }]);\\n    \\n    console.log('Visit this link to connect Spotify:', authUrl);\\n    return null;\\n  }\\n  return response.json();\\n})\\n.then(data => {\\n  if (data && data.item) {\\n    // Show currently playing track\\n    const trackInfo = `♪ ${data.item.name} - ${data.item.artists[0].name}`;\\n    setElements(prev => [...prev, {\\n      id: 'now-playing-' + Date.now(),\\n      type: 'text',\\n      content: trackInfo,\\n      position: { x: element.position.x, y: element.position.y - 15 },\\n      size: 18,\\n      color: '#1DB954',\\n      animation: 'float'\\n    }]);\\n    \\n    // Auto-remove after 5 seconds\\n    setTimeout(() => {\\n      setElements(prev => prev.filter(el => !el.id.startsWith('now-playing-')));\\n    }, 5000);\\n  } else {\\n    // No track playing\\n    setElements(prev => [...prev, {\\n      id: 'no-music-' + Date.now(),\\n      type: 'text',\\n      content: '🔇 No music playing',\\n      position: { x: element.position.x, y: element.position.y - 10 },\\n      size: 16,\\n      color: '#888'\\n    }]);\\n  }\\n})\\n.catch(error => {\\n  console.log('Spotify connection demo - would need real API keys');\\n  // Show demo message instead\\n  setElements(prev => [...prev, {\\n    id: 'spotify-demo-' + Date.now(),\\n    type: 'text',\\n    content: '🎵 Spotify Demo - \\\"Bohemian Rhapsody\\\" playing',\\n    position: { x: element.position.x, y: element.position.y - 15 },\\n    size: 18,\\n    color: '#1DB954',\\n    animation: 'pulse'\\n  }]);\\n  \\n  setTimeout(() => {\\n    setElements(prev => prev.filter(el => !el.id.startsWith('spotify-demo-')));\\n  }, 4000);\\n});\"}",
+      "createdAt": "2026-01-12T13:37:32.434Z",
+      "usageCount": 0
+    },
+    {
+      "id": "cap-1768226957839",
+      "name": "skyBackground",
+      "description": "Creates a beautiful sky gradient background that covers the entire canvas",
+      "handler": "{\"trigger\":\"load\",\"code\":\"// Create a sky gradient background\\nconst skyGradient = {\\n  id: 'sky-background-' + Date.now(),\\n  type: 'shape',\\n  content: 'rectangle',\\n  position: { x: 50, y: 50 },\\n  size: 200, // Large enough to cover canvas\\n  customProps: {\\n    background: 'linear-gradient(180deg, #87CEEB 0%, #E6F3FF 50%, #FFE4B5 100%)',\\n    borderRadius: '0px',\\n    zIndex: -1, // Behind other elements\\n    width: '100vw',\\n    height: '100vh',\\n    position: 'fixed',\\n    top: '0',\\n    left: '0'\\n  },\\n  draggable: false\\n};\\nsetElements(prev => [skyGradient, ...prev]);\"}",
+      "createdAt": "2026-01-12T14:09:17.839Z",
+      "usageCount": 0
+    }
+  ]
+}

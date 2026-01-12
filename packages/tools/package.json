@@ -1,0 +1,23 @@
+{
+  "name": "@nutz/tools",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "test:tts": "tsx src/test-tools.ts tts",
+    "test:video": "tsx src/test-tools.ts video",
+    "test:persona": "tsx src/test-tools.ts persona",
+    "test:orchestrate": "tsx src/orchestrate-cli.ts",
+    "generate-room": "tsx src/generate-room-cli.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@daytonaio/sdk": "^0.128.1",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.19.0",
+    "typescript": "^5"
+  }
+}

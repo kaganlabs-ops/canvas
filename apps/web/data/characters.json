@@ -1,0 +1,70 @@
+{
+  "characters": [
+    {
+      "id": "user-1767951423700-l1bnsw",
+      "name": "Kagan",
+      "avatar": "/kagan-avatar.jpg",
+      "background": "https://v3b.fal.media/files/b/0a89ae17/C0eaf9KGKYo4KL7-rUSTR_output.mp4",
+      "videoSources": {
+        "idle": "https://v3b.fal.media/files/b/0a89ae17/C0eaf9KGKYo4KL7-rUSTR_output.mp4",
+        "listening": "https://v3b.fal.media/files/b/0a89ae17/C0eaf9KGKYo4KL7-rUSTR_output.mp4",
+        "speaking": "https://v3b.fal.media/files/b/0a89ae17/C0eaf9KGKYo4KL7-rUSTR_output.mp4"
+      },
+      "topics": [
+        "r u fucin nutz"
+      ],
+      "agentId": "agent_6601keh1w28ee4kvvqd32e7qx1ts",
+      "voiceId": "ITTUnT6ahAcn9uFKwNj0",
+      "createdAt": "2026-01-09T09:40:00.647Z"
+    },
+    {
+      "id": "user-1767951767259-as1tm9",
+      "name": "Lenny baby",
+      "avatar": "/lenny-avatar.jpg",
+      "background": "https://v3b.fal.media/files/b/0a89ae3b/9HqQoGfsrq9OxiQBnB_hS_output.mp4",
+      "videoSources": {
+        "idle": "https://v3b.fal.media/files/b/0a89ae3b/9HqQoGfsrq9OxiQBnB_hS_output.mp4",
+        "listening": "https://v3b.fal.media/files/b/0a89ae3b/9HqQoGfsrq9OxiQBnB_hS_output.mp4",
+        "speaking": "https://v3b.fal.media/files/b/0a89ae3b/9HqQoGfsrq9OxiQBnB_hS_output.mp4"
+      },
+      "topics": [],
+      "agentId": "agent_4601keh26gy3f2pbjeqtext5nhse",
+      "voiceId": "TEokH1lerlU19YB9acaG",
+      "createdAt": "2026-01-09T09:45:55.857Z"
+    },
+    {
+      "id": "user-1768051946488-tyvpws",
+      "name": "Sonja",
+      "avatar": "https://v3b.fal.media/files/b/0a89d54a/c8haJAOWSvVhCdDR10CBE_PHOTO-2026-01-10-14-26-44.jpg",
+      "background": "https://v3b.fal.media/files/b/0a89d55b/3Rry6iLpXMeheL_ycRoyH_output.mp4",
+      "videoSources": {
+        "idle": "https://v3b.fal.media/files/b/0a89d55b/3Rry6iLpXMeheL_ycRoyH_output.mp4",
+        "listening": "https://v3b.fal.media/files/b/0a89d55b/3Rry6iLpXMeheL_ycRoyH_output.mp4",
+        "speaking": "https://v3b.fal.media/files/b/0a89d55b/3Rry6iLpXMeheL_ycRoyH_output.mp4"
+      },
+      "topics": [
+        "Pilates",
+        "sports",
+        "mama"
+      ],
+      "agentId": "agent_7301kem1qrc5en38t3c2gjjtack6",
+      "voiceId": "SePcsqmckS8eMTr7mZOj",
+      "createdAt": "2026-01-10T13:35:21.257Z"
+    },
+    {
+      "id": "user-1768091570462-xl2iue",
+      "name": "baris",
+      "avatar": "https://v3b.fal.media/files/b/0a89e4c5/JmikN_bmZTAKr7oNwAWH8_IMG_6383.HEIC",
+      "background": "https://v3b.fal.media/files/b/0a89e4d5/73rVJbNYoj3p96Clsa1-D_output.mp4",
+      "videoSources": {
+        "idle": "https://v3b.fal.media/files/b/0a89e4d5/73rVJbNYoj3p96Clsa1-D_output.mp4",
+        "listening": "https://v3b.fal.media/files/b/0a89e4d5/73rVJbNYoj3p96Clsa1-D_output.mp4",
+        "speaking": "https://v3b.fal.media/files/b/0a89e4d5/73rVJbNYoj3p96Clsa1-D_output.mp4"
+      },
+      "topics": [],
+      "agentId": "agent_6301ken7gy5aezvbbv1mxyxyjw1q",
+      "voiceId": "LQ14MlgkXrIzjrKlLoED",
+      "createdAt": "2026-01-11T00:35:38.071Z"
+    }
+  ]
+}

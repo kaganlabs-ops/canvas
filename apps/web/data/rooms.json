@@ -1,0 +1,44 @@
+{
+  "rooms": [
+    {
+      "id": "steve-jobs-room",
+      "type": "learn",
+      "config": {
+        "characterIds": [
+          "steve-jobs"
+        ]
+      },
+      "createdAt": "2026-01-10T14:00:00.000Z"
+    },
+    {
+      "id": "cyberpunk-kreuzberg",
+      "type": "immersive",
+      "config": {
+        "prompt": "Cyberpunk Kreuzberg Hacker Den",
+        "status": "ready",
+        "previewUrl": "/rooms/cyberpunk-kreuzberg/index.html"
+      },
+      "createdAt": "2026-01-12T12:00:00.000Z"
+    },
+    {
+      "id": "generated-1768221286258-uw9fvq",
+      "type": "generated",
+      "config": {
+        "prompt": "A conversation with Steve Jobs where he shares insights about innovation, design thinking, and building revolutionary products",
+        "mood": "work",
+        "status": "ready"
+      },
+      "createdAt": "2026-01-12T12:34:46.259Z"
+    },
+    {
+      "id": "generated-1768221316345-2qayab",
+      "type": "generated",
+      "config": {
+        "prompt": "A cozy winter workshop filled with art supplies and tools where I can brainstorm creative projects and get inspiration",
+        "mood": "creative",
+        "status": "ready"
+      },
+      "createdAt": "2026-01-12T12:35:16.345Z"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@nutz/generator",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/generate.ts",
+  "scripts": {
+    "generate": "tsx src/generate.ts",
+    "snapshot": "tsx src/snapshot.ts",
+    "cleanup": "tsx src/cleanup.ts",
+    "start": "tsx src/start.ts"
+  },
+  "dependencies": {
+    "@daytonaio/sdk": "^0.128.1",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "tsx": "^4.19.0",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "nutz",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --filter @nutz/web dev",
+    "build": "pnpm --filter @nutz/web build",
+    "generate": "pnpm --filter @nutz/generator generate"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5"
+  }
+}
