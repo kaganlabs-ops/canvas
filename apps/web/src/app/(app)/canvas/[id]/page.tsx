@@ -1,300 +1,251 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useRouter, useSearchParams, useParams } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
+import { useCanvasState } from "@/hooks/canvas/useCanvasState";
+import { useAuthState } from "@/hooks/canvas/useAuthState";
+import { useOneThing } from "@/hooks/canvas/useOneThing";
+import {
+  ChatPanel,
+  CanvasArea,
+  ControlBar,
+  Background,
+  PopupModal,
+  StoryPlayer,
+  OneThingModal,
+  OneThingOverlay,
+} from "@/components/canvas";
+import { OnboardingModal } from "@/components/onboarding";
+import type {
+  Message,
+  SceneElement,
+  AttachedCapability,
+  CreatedRoom,
+  BuildingRoom,
+  Popup,
+  SpotifyContext,
+} from "@/components/canvas/types";
 
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface SpotifyAuth {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number;
-}
-
-interface SpotifyTrack {
-  name: string;
-  artist: string;
-  album: string;
-  albumArt?: string;
-  uri: string;
-  externalUrl: string;
-}
-
-interface ClickAction {
-  type: "showImage" | "showText" | "playSound" | "navigate" | "addElements" | "removeThis" | "transform";
-  payload?: string;
-}
-
-interface SceneElement {
-  id: string;
-  type: "emoji" | "text" | "shape" | "image";
-  content: string;
-  position: { x: number; y: number };
-  size: number;
-  color: string;
-  animation?: "float" | "pulse" | "spin" | "bounce" | "none";
-  rotation?: number;
-  opacity?: number;
-  draggable?: boolean;
-  clickAction?: ClickAction | null;
-}
-
-interface SceneAction {
-  type: "add" | "remove" | "modify" | "duplicate" | "finish" | "attachCapability" | "replaceWithImage" | "startGenerating" | "stopGenerating" | "modifyBackground";
-  data: Record<string, unknown>;
-}
-
-interface BackgroundConfig {
-  type: "grid" | "dots" | "none" | "image";
-  color: string;
-  secondaryColor?: string;
-  size: number;
-  opacity: number;
-  imageUrl?: string;
-}
-
-interface AttachedCapability {
-  elementId: string;
-  trigger: "click" | "hover" | "load" | "interval" | "drag";
-  code: string;
+// SpeechRecognition types for browser API
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((event: { results: ArrayLike<{ 0: { transcript: string } }> }) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+  start: () => void;
+  stop: () => void;
 }
 
 export default function CanvasPage() {
   const router = useRouter();
   const params = useParams();
   const canvasId = params.id as string;
-  const storageKey = `nutz_canvas_${canvasId}`;
 
+  // Popup state (needs to be here for auth hook)
+  const [popup, setPopup] = useState<Popup | null>(null);
+  const [lastClickedElement, setLastClickedElement] = useState<{ element: SceneElement; position: { x: number; y: number } } | null>(null);
+
+  // Canvas state hook
+  const {
+    elements,
+    setElements,
+    background,
+    capabilities,
+    setCapabilities,
+    generatingElements,
+    setGeneratingElements,
+    setGenerationStatus,
+    isBackgroundGenerating,
+    processActions,
+  } = useCanvasState({ canvasId });
+
+  // Auth state hook
+  const {
+    spotifyAuth,
+    spotifyTrack,
+    isSpotifyConnecting,
+    connectSpotify,
+    fetchNowPlaying,
+    controlSpotify,
+    googleAuth,
+    isGoogleConnecting,
+    connectGoogle,
+  } = useAuthState({ setPopup });
+
+  // Chat state
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [elements, setElements] = useState<SceneElement[]>([]);
   const [hasStarted, setHasStarted] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
-  const [draggedElement, setDraggedElement] = useState<string | null>(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [popup, setPopup] = useState<{ type: "text" | "image"; content: string } | null>(null);
-  const [capabilities, setCapabilities] = useState<AttachedCapability[]>([]);
-  const [generatingElements, setGeneratingElements] = useState<Set<string>>(new Set());
-  const [didDrag, setDidDrag] = useState(false);
-  const [background, setBackground] = useState<BackgroundConfig>({
-    type: "grid",
-    color: "#33ff00",
-    size: 40,
-    opacity: 0.05,
-  });
-  const [isBackgroundGenerating, setIsBackgroundGenerating] = useState(false);
-  const [spotifyAuth, setSpotifyAuth] = useState<SpotifyAuth | null>(null);
-  const [spotifyTrack, setSpotifyTrack] = useState<SpotifyTrack | null>(null);
-  const [isSpotifyConnecting, setIsSpotifyConnecting] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const searchParams = useSearchParams();
 
-  // Auto-scroll messages
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  // Helper mode state
+  const [isHelperMode, setIsHelperMode] = useState(false);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
-  // Focus input
+  // Story mode state
+  const [isStoryMode, setIsStoryMode] = useState(false);
+
+  // Onboarding modal state
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  // One Thing (todo) mode state
+  const [isOneThingMode, setIsOneThingMode] = useState(false);
+  const [oneThingPosition, setOneThingPosition] = useState<{ x: number; y: number } | null>(null);
+  const {
+    todos: oneThingTodos,
+    addTodo: addOneThingTodo,
+    toggleTodo: toggleOneThingTodo,
+    removeTodo: removeOneThingTodo,
+    clearCompleted: clearOneThingCompleted,
+    firstPendingTodo,
+    pendingCount,
+  } = useOneThing();
+
+  // Voice input state
+  const [isListening, setIsListening] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+
+  // Clarification state
+  const [pendingClarification, setPendingClarification] = useState<{
+    originalPrompt: string;
+    targetElementId: string;
+    targetContent: string;
+  } | null>(null);
+
+  // Rooms state
+  const [createdRooms, setCreatedRooms] = useState<CreatedRoom[]>([]);
+  const [buildingRooms, setBuildingRooms] = useState<BuildingRoom[]>([]);
+
+  // Initialize speech recognition
   useEffect(() => {
-    inputRef.current?.focus();
+    if (typeof window !== "undefined") {
+      const windowWithSpeech = window as unknown as {
+        SpeechRecognition?: new () => SpeechRecognitionInstance;
+        webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+      };
+      const SpeechRecognitionClass = windowWithSpeech.SpeechRecognition || windowWithSpeech.webkitSpeechRecognition;
+      if (SpeechRecognitionClass) {
+        const recognition = new SpeechRecognitionClass();
+        recognition.continuous = false;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+
+        recognition.onresult = (event) => {
+          const transcript = Array.from(event.results)
+            .map((result) => result[0].transcript)
+            .join("");
+          setInput(transcript);
+        };
+
+        recognition.onend = () => setIsListening(false);
+        recognition.onerror = () => setIsListening(false);
+
+        recognitionRef.current = recognition;
+      }
+    }
   }, []);
 
-  // Load canvas state from localStorage on mount
+  const toggleListening = useCallback(() => {
+    if (!recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      setInput("");
+      recognitionRef.current.start();
+      setIsListening(true);
+    }
+  }, [isListening]);
+
+  // ESC key to close helper mode
   useEffect(() => {
-    const stored = localStorage.getItem(storageKey);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isHelperMode) {
+        setIsHelperMode(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isHelperMode]);
+
+  // Load created rooms from localStorage
+  useEffect(() => {
+    const stored = localStorage.getItem("nutz_created_rooms");
     if (stored) {
       try {
-        const state = JSON.parse(stored);
-        if (state.elements) setElements(state.elements);
-        if (state.background) setBackground(state.background);
-        if (state.capabilities) setCapabilities(state.capabilities);
+        setCreatedRooms(JSON.parse(stored) as CreatedRoom[]);
       } catch {
-        localStorage.removeItem(storageKey);
-      }
-    }
-    setIsLoaded(true);
-  }, [storageKey]);
-
-  // Save canvas state to localStorage (debounced)
-  useEffect(() => {
-    if (!isLoaded) return; // Don't save until we've loaded first
-
-    const timeout = setTimeout(() => {
-      const hasContent = elements.length > 0 || capabilities.length > 0 || background.type !== "grid";
-      if (hasContent) {
-        const state = {
-          elements,
-          background,
-          capabilities,
-          savedAt: Date.now(),
-        };
-        localStorage.setItem(storageKey, JSON.stringify(state));
-      }
-    }, 500);
-    return () => clearTimeout(timeout);
-  }, [elements, background, capabilities, storageKey, isLoaded]);
-
-  // Load Spotify auth from localStorage on mount
-  useEffect(() => {
-    const stored = localStorage.getItem("spotify_auth");
-    if (stored) {
-      try {
-        const auth = JSON.parse(stored) as SpotifyAuth;
-        if (auth.expiresAt > Date.now()) {
-          setSpotifyAuth(auth);
-        } else {
-          // Token expired, try to refresh
-          refreshSpotifyToken(auth.refreshToken);
-        }
-      } catch {
-        localStorage.removeItem("spotify_auth");
+        localStorage.removeItem("nutz_created_rooms");
       }
     }
   }, []);
 
-  // Handle Spotify OAuth callback (tokens in URL hash)
+  // Clear building rooms on mount
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const hash = window.location.hash;
-    if (hash.includes("spotify_access_token")) {
-      const params = new URLSearchParams(hash.substring(1));
-      const accessToken = params.get("spotify_access_token");
-      const refreshToken = params.get("spotify_refresh_token");
-      const expiresIn = params.get("spotify_expires_in");
-
-      if (accessToken && refreshToken && expiresIn) {
-        const auth: SpotifyAuth = {
-          accessToken,
-          refreshToken,
-          expiresAt: Date.now() + parseInt(expiresIn) * 1000,
-        };
-        setSpotifyAuth(auth);
-        localStorage.setItem("spotify_auth", JSON.stringify(auth));
-
-        // Clear hash from URL
-        window.history.replaceState(null, "", window.location.pathname);
-
-        // Fetch now playing
-        fetchNowPlaying(accessToken);
-      }
-    }
-
-    // Check for errors
-    const error = searchParams.get("spotify_error");
-    if (error) {
-      console.error("Spotify auth error:", error);
-    }
-  }, [searchParams]);
-
-  const refreshSpotifyToken = async (refreshToken: string) => {
-    try {
-      const response = await fetch("/api/spotify/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refreshToken }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const auth: SpotifyAuth = {
-          accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
-          expiresAt: Date.now() + data.expiresIn * 1000,
-        };
-        setSpotifyAuth(auth);
-        localStorage.setItem("spotify_auth", JSON.stringify(auth));
-      } else {
-        localStorage.removeItem("spotify_auth");
-        setSpotifyAuth(null);
-      }
-    } catch (err) {
-      console.error("Failed to refresh Spotify token:", err);
-      localStorage.removeItem("spotify_auth");
-      setSpotifyAuth(null);
-    }
-  };
-
-  const fetchNowPlaying = useCallback(async (token: string) => {
-    try {
-      const response = await fetch("/api/spotify/now-playing", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.track) {
-          setSpotifyTrack(data.track);
-        }
-      } else if (response.status === 401) {
-        // Token expired, try refresh
-        const stored = localStorage.getItem("spotify_auth");
-        if (stored) {
-          const auth = JSON.parse(stored) as SpotifyAuth;
-          await refreshSpotifyToken(auth.refreshToken);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch now playing:", err);
-    }
+    localStorage.removeItem("nutz_building_rooms");
+    setBuildingRooms([]);
   }, []);
 
-  const connectSpotify = async () => {
-    setIsSpotifyConnecting(true);
-    try {
-      const response = await fetch("/api/spotify/auth");
-      const data = await response.json();
+  // Room management callbacks
+  const addCreatedRoom = useCallback((room: CreatedRoom) => {
+    setCreatedRooms(prev => {
+      const filtered = prev.filter(r => r.url !== room.url);
+      const updated = [room, ...filtered].slice(0, 5);
+      localStorage.setItem("nutz_created_rooms", JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
-      if (!response.ok) {
-        console.error("Spotify auth error:", data.error);
-        setPopup({ type: "text", content: data.error || "Spotify not configured" });
-        setIsSpotifyConnecting(false);
-        return;
-      }
+  const removeCreatedRoom = useCallback((url: string) => {
+    setCreatedRooms(prev => {
+      const updated = prev.filter(r => r.url !== url);
+      localStorage.setItem("nutz_created_rooms", JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
-      // Store state for CSRF verification
-      localStorage.setItem("spotify_auth_state", data.state);
-      // Redirect to Spotify auth
-      window.location.href = data.authUrl;
-    } catch (err) {
-      console.error("Failed to start Spotify auth:", err);
-      setPopup({ type: "text", content: "Failed to connect to Spotify" });
-      setIsSpotifyConnecting(false);
-    }
-  };
-
-  const controlSpotify = async (action: string, params?: Record<string, unknown>) => {
-    if (!spotifyAuth) return;
-
-    try {
-      const response = await fetch("/api/spotify/play", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${spotifyAuth.accessToken}`,
-        },
-        body: JSON.stringify({ action, ...params }),
+  // Listen for room creation events
+  useEffect(() => {
+    const handleRoomCreated = (event: CustomEvent<CreatedRoom>) => {
+      addCreatedRoom(event.detail);
+      setBuildingRooms(prev => {
+        const updated = prev.filter(r => r.prompt !== event.detail.title);
+        localStorage.setItem("nutz_building_rooms", JSON.stringify(updated));
+        return updated;
       });
+    };
 
-      if (response.status === 401) {
-        await refreshSpotifyToken(spotifyAuth.refreshToken);
-      } else if (response.ok) {
-        // Refresh now playing after control action
-        setTimeout(() => fetchNowPlaying(spotifyAuth.accessToken), 500);
-      }
+    const handleRoomBuilding = (event: CustomEvent<BuildingRoom>) => {
+      setBuildingRooms(prev => {
+        const existing = prev.find(r => r.id === event.detail.id);
+        const updated = existing
+          ? prev.map(r => r.id === event.detail.id ? event.detail : r)
+          : [...prev, event.detail];
+        localStorage.setItem("nutz_building_rooms", JSON.stringify(updated));
+        return updated;
+      });
+    };
 
-      return response.ok;
-    } catch (err) {
-      console.error("Spotify control error:", err);
-      return false;
-    }
-  };
+    const handleRoomBuildingComplete = (event: CustomEvent<{ id: string }>) => {
+      setBuildingRooms(prev => {
+        const updated = prev.filter(r => r.id !== event.detail.id);
+        localStorage.setItem("nutz_building_rooms", JSON.stringify(updated));
+        return updated;
+      });
+    };
+
+    window.addEventListener("room-created" as keyof WindowEventMap, handleRoomCreated as EventListener);
+    window.addEventListener("room-building" as keyof WindowEventMap, handleRoomBuilding as EventListener);
+    window.addEventListener("room-building-complete" as keyof WindowEventMap, handleRoomBuildingComplete as EventListener);
+    return () => {
+      window.removeEventListener("room-created" as keyof WindowEventMap, handleRoomCreated as EventListener);
+      window.removeEventListener("room-building" as keyof WindowEventMap, handleRoomBuilding as EventListener);
+      window.removeEventListener("room-building-complete" as keyof WindowEventMap, handleRoomBuildingComplete as EventListener);
+    };
+  }, [addCreatedRoom]);
 
   // Initial greeting
   useEffect(() => {
@@ -309,213 +260,152 @@ export default function CanvasPage() {
     }
   }, [hasStarted]);
 
-  const processActions = (actions: SceneAction[]) => {
-    console.log("Processing actions:", actions);
-    for (const action of actions) {
-      console.log("Processing action:", action);
-      if (action.type === "add") {
-        console.log("Adding element:", action.data);
-        const newElement: SceneElement = {
-          id: action.data.id as string,
-          type: action.data.type as SceneElement["type"],
-          content: action.data.content as string,
-          position: action.data.position as { x: number; y: number },
-          size: action.data.size as number,
-          color: action.data.color as string,
-          animation: action.data.animation as SceneElement["animation"],
-          rotation: action.data.rotation as number | undefined,
-          opacity: action.data.opacity as number | undefined,
-          draggable: action.data.draggable as boolean | undefined ?? true,
-          clickAction: action.data.clickAction as ClickAction | null | undefined,
-        };
-        setElements((prev) => {
-          console.log("Setting elements, prev count:", prev.length, "new element:", newElement);
-          return [...prev, newElement];
-        });
-      } else if (action.type === "remove") {
-        const target = action.data.target as string;
-        const match = action.data.match as string | undefined;
+  // Food-related keywords for showing eat out / cook options
+  const foodKeywords = ["pizza", "burger", "sushi", "taco", "pasta", "salad", "sandwich", "steak", "chicken", "fish", "curry", "ramen", "pho", "soup", "bread", "cake", "ice cream", "donut", "cookie", "pie", "food", "meal", "dish"];
 
-        if (target === "all") {
-          setElements([]);
-        } else if (target === "last") {
-          setElements((prev) => prev.slice(0, -1));
-        } else if (target === "matching" && match) {
-          setElements((prev) =>
-            prev.filter((el) => !el.content.includes(match))
-          );
-        }
-      } else if (action.type === "modify") {
-        const target = action.data.target as string;
-        const match = action.data.match as string | undefined;
-        const changes = action.data.changes as Partial<SceneElement> & { x?: number; y?: number };
+  const isFoodElement = useCallback((description: string) => {
+    const lower = description.toLowerCase();
+    return foodKeywords.some(keyword => lower.includes(keyword));
+  }, []);
 
-        setElements((prev) => {
-          let lastIndex = prev.length - 1;
-          return prev.map((el, index) => {
-            const shouldModify =
-              target === "all" ||
-              (target === "last" && index === lastIndex) ||
-              (target === "matching" && match && el.content.includes(match));
+  // Check if element is the help button (pink tilted element)
+  const isHelpButton = useCallback((element: SceneElement) => {
+    const desc = (element.description || element.content).toLowerCase();
+    // Check for common help button indicators
+    return desc.includes("help") || desc.includes("?") || desc.includes("assistant") || desc.includes("helper");
+  }, []);
 
-            if (shouldModify) {
-              // Handle x/y as position updates
-              const positionUpdate = (changes.x !== undefined || changes.y !== undefined)
-                ? { position: { x: changes.x ?? el.position.x, y: changes.y ?? el.position.y } }
-                : {};
-              const { x, y, ...otherChanges } = changes;
-              return { ...el, ...otherChanges, ...positionUpdate };
-            }
-            return el;
-          });
-        });
-      } else if (action.type === "duplicate") {
-        const target = action.data.target as string;
-        const match = action.data.match as string | undefined;
-        const count = (action.data.count as number) || 1;
-        const scatter = action.data.scatter !== false;
+  // Check if element is the story button
+  const isStoryButton = useCallback((element: SceneElement) => {
+    const desc = (element.description || element.content).toLowerCase();
+    return desc.includes("story") || desc.includes("book") || desc.includes("tale") || desc.includes("narrative");
+  }, []);
 
-        setElements((prev) => {
-          let sourceElement: SceneElement | undefined;
+  // Check if element is the ONE THING todo button
+  const isOneThingButton = useCallback((element: SceneElement) => {
+    const desc = (element.description || element.content).toLowerCase();
+    return desc.includes("one thing") || desc.includes("onething") || desc.includes("todo") || desc.includes("goals") || desc.includes("☝️");
+  }, []);
 
-          if (target === "last") {
-            sourceElement = prev[prev.length - 1];
-          } else if (target === "matching" && match) {
-            sourceElement = prev.find((el) => el.content.includes(match));
-          }
+  // Trigger AI reaction for element click
+  const triggerAIReaction = useCallback(async (element: SceneElement, clickPosition: { x: number; y: number }, action?: string) => {
+    const description = element.description || element.content;
 
-          if (!sourceElement) return prev;
+    // Store for regeneration
+    setLastClickedElement({ element, position: clickPosition });
 
-          const newElements: SceneElement[] = [];
-          for (let i = 0; i < count; i++) {
-            const offset = scatter
-              ? { x: (Math.random() - 0.5) * 30, y: (Math.random() - 0.5) * 30 }
-              : { x: 2 * (i + 1), y: 2 * (i + 1) };
-
-            newElements.push({
-              ...sourceElement,
-              id: `el-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              position: {
-                x: Math.max(0, Math.min(100, sourceElement.position.x + offset.x)),
-                y: Math.max(0, Math.min(65, sourceElement.position.y + offset.y)),
-              },
-            });
-          }
-
-          return [...prev, ...newElements];
-        });
-      } else if (action.type === "attachCapability") {
-        const trigger = action.data.trigger as AttachedCapability["trigger"];
-        const code = action.data.code as string;
-        const targetElement = action.data.targetElement as string;
-
-        // Find the target element
-        setElements((prev) => {
-          let targetId: string | undefined;
-          if (targetElement === "last") {
-            targetId = prev[prev.length - 1]?.id;
-          } else {
-            const found = prev.find((el) => el.content.includes(targetElement));
-            targetId = found?.id;
-          }
-
-          if (targetId) {
-            setCapabilities((caps) => [
-              ...caps,
-              { elementId: targetId!, trigger, code },
-            ]);
-          }
-          return prev;
-        });
-      } else if (action.type === "startGenerating") {
-        const target = action.data.target as string;
-        const match = action.data.match as string | undefined;
-
-        setElements((prev) => {
-          const lastIndex = prev.length - 1;
-          const targetIds: string[] = [];
-          prev.forEach((el, index) => {
-            const shouldMark =
-              (target === "last" && index === lastIndex) ||
-              (target === "matching" && match && el.content.includes(match));
-            if (shouldMark) targetIds.push(el.id);
-          });
-          setGeneratingElements((prev) => new Set([...prev, ...targetIds]));
-          return prev;
-        });
-      } else if (action.type === "stopGenerating") {
-        const elementId = action.data.elementId as string;
-        setGeneratingElements((prev) => {
-          const next = new Set(prev);
-          next.delete(elementId);
-          return next;
-        });
-      } else if (action.type === "replaceWithImage") {
-        const target = action.data.target as string;
-        const match = action.data.match as string | undefined;
-        const imageUrl = action.data.imageUrl as string;
-        const size = (action.data.size as number) || 150;
-
-        setElements((prev) => {
-          const lastIndex = prev.length - 1;
-          return prev.map((el, index) => {
-            const shouldReplace =
-              (target === "last" && index === lastIndex) ||
-              (target === "matching" && match && el.content.includes(match));
-
-            if (shouldReplace) {
-              // Clear generating state for this element
-              setGeneratingElements((genSet) => {
-                const next = new Set(genSet);
-                next.delete(el.id);
-                return next;
-              });
-              return {
-                ...el,
-                type: "image" as const,
-                content: imageUrl,
-                size: size,
-              };
-            }
-            return el;
-          });
-        });
-      } else if (action.type === "finish") {
-        const roomName = action.data.roomName as string;
-        setTimeout(() => {
-          // Save the room
-          saveRoom(roomName);
-        }, 1000);
-      } else if (action.type === "modifyBackground") {
-        const changes = action.data as Partial<BackgroundConfig> & { generating?: boolean };
-
-        if (changes.generating !== undefined) {
-          setIsBackgroundGenerating(changes.generating);
-        }
-
-        setBackground((prev) => ({
-          ...prev,
-          ...(changes.type !== undefined && { type: changes.type }),
-          ...(changes.color !== undefined && { color: changes.color }),
-          ...(changes.secondaryColor !== undefined && { secondaryColor: changes.secondaryColor }),
-          ...(changes.size !== undefined && { size: changes.size }),
-          ...(changes.opacity !== undefined && { opacity: changes.opacity }),
-          ...(changes.imageUrl !== undefined && { imageUrl: changes.imageUrl }),
-        }));
-      }
+    // Check if this is the help button - activate helper mode
+    if (isHelpButton(element)) {
+      setIsHelperMode(true);
+      // Focus the chat input after a short delay
+      setTimeout(() => {
+        chatInputRef.current?.focus();
+      }, 100);
+      return;
     }
-  };
 
-  // Execute capability code safely
-  const executeCapability = (elementId: string, trigger: AttachedCapability["trigger"], event?: React.MouseEvent) => {
-    const cap = capabilities.find((c) => c.elementId === elementId && c.trigger === trigger);
-    if (!cap) return;
+    // Check if this is the story button - activate story mode
+    if (isStoryButton(element)) {
+      setIsStoryMode(true);
+      return;
+    }
 
+    // Check if this is the ONE THING button - activate todo mode
+    if (isOneThingButton(element)) {
+      setOneThingPosition(clickPosition);
+      setIsOneThingMode(true);
+      return;
+    }
+
+    // If it's a food item and no action specified yet, show options first
+    if (isFoodElement(description) && !action) {
+      setPopup({
+        type: "options",
+        content: "",
+        elementDescription: description,
+        position: clickPosition,
+        options: [
+          { label: "Eat out", icon: "🍽️", action: "eat_out" },
+          { label: "Cook at home", icon: "👨‍🍳", action: "cook" },
+        ],
+      });
+      return;
+    }
+
+    // Show loading popup near the element
+    setPopup({
+      type: "ai-response",
+      content: "",
+      isLoading: true,
+      elementDescription: description,
+      position: clickPosition,
+    });
+
+    // Build the prompt based on the action
+    let promptContext = "";
+    if (action === "eat_out") {
+      promptContext = "The user wants to EAT OUT. Give restaurant recommendations near their location for this food. Include 2-3 specific restaurant types or chains that serve this well. Keep it short and actionable.";
+    } else if (action === "cook") {
+      promptContext = "The user wants to COOK this at home. Give a quick, simple recipe with ingredients and steps. Keep it concise - 5 ingredients max, 5 steps max.";
+    }
+
+    try {
+      const response = await fetch("/api/canvas/react", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          elementDescription: description,
+          elementType: element.type,
+          promptContext,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setPopup({
+          type: "ai-response",
+          content: data.response,
+          isLoading: false,
+          elementDescription: description,
+          position: clickPosition,
+        });
+      } else {
+        setPopup(null);
+      }
+    } catch (error) {
+      console.error("AI reaction error:", error);
+      setPopup(null);
+    }
+  }, [isFoodElement, isHelpButton, isStoryButton, isOneThingButton]);
+
+  // Handle option selection from popup
+  const handleOptionSelect = useCallback((action: string) => {
+    if (lastClickedElement) {
+      triggerAIReaction(lastClickedElement.element, lastClickedElement.position, action);
+    }
+  }, [lastClickedElement, triggerAIReaction]);
+
+  // Execute capability code safely (or trigger AI reaction if no capability)
+  const executeCapability = useCallback((elementId: string, trigger: AttachedCapability["trigger"], event?: React.MouseEvent) => {
     const element = elements.find((el) => el.id === elementId);
     if (!element) return;
 
-    // Build Spotify context for capabilities
-    const spotifyContext = {
+    const cap = capabilities.find((c) => c.elementId === elementId && c.trigger === trigger);
+
+    // If no capability attached, trigger AI reaction on click
+    if (!cap) {
+      if (trigger === "click" && event) {
+        // Get click position for popup placement
+        const clickPosition = {
+          x: event.clientX - 144, // Center popup (288px / 2)
+          y: event.clientY,
+        };
+        triggerAIReaction(element, clickPosition);
+      }
+      return;
+    }
+
+    const spotifyContext: SpotifyContext = {
       isConnected: !!spotifyAuth,
       track: spotifyTrack,
       connect: connectSpotify,
@@ -524,7 +414,18 @@ export default function CanvasPage() {
     };
 
     try {
-      // Create a safe execution context
+      let cleanCode = cap.code;
+      cleanCode = cleanCode.replace(/^```(?:javascript|js)?\s*\n?/i, '');
+      cleanCode = cleanCode.replace(/\n?```\s*$/i, '');
+      cleanCode = cleanCode.trim();
+
+      const stableSetElements: typeof setElements = (update) => {
+        const currentSetElements = (window as unknown as { __canvasSetElements: typeof setElements }).__canvasSetElements;
+        if (currentSetElements) {
+          currentSetElements(update);
+        }
+      };
+
       const fn = new Function(
         "element",
         "elements",
@@ -532,15 +433,16 @@ export default function CanvasPage() {
         "event",
         "setPopup",
         "spotify",
-        cap.code
+        cleanCode
       );
-      fn(element, elements, setElements, event, setPopup, spotifyContext);
+      fn(element, elements, stableSetElements, event, setPopup, spotifyContext);
     } catch (error) {
       console.error("Capability execution error:", error);
     }
-  };
+  }, [capabilities, elements, spotifyAuth, spotifyTrack, connectSpotify, fetchNowPlaying, controlSpotify, setElements, triggerAIReaction]);
 
-  const saveRoom = async (roomName: string) => {
+  // Save room
+  const saveRoom = useCallback(async (roomName: string) => {
     try {
       await fetch("/api/rooms", {
         method: "POST",
@@ -561,9 +463,136 @@ export default function CanvasPage() {
     } catch (error) {
       console.error("Failed to save room:", error);
     }
-  };
+  }, [elements, router]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Stream capability generation with progress updates
+  const generateCapabilityWithProgress = useCallback(async (
+    prompt: string,
+    targetElementId: string,
+    targetContent: string,
+    currentElements: SceneElement[],
+    conversationHistory: Message[],
+    planningResponse?: string
+  ) => {
+    setGeneratingElements((prev) => new Set([...prev, targetElementId]));
+    setGenerationStatus((prev) => new Map(prev).set(targetElementId, "Starting..."));
+
+    try {
+      const response = await fetch("/api/canvas/generate-capability", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          elementInfo: { id: targetElementId, content: targetContent },
+          targetElement: targetContent,
+          canvasElements: currentElements,
+          conversationHistory: conversationHistory,
+          planningResponse,
+        }),
+      });
+
+      if (!response.ok) throw new Error("Failed to start generation");
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            const data = line.slice(6);
+            if (data === "[DONE]") continue;
+
+            try {
+              const parsed = JSON.parse(data);
+
+              if (parsed.event === "status") {
+                setGenerationStatus((prev) =>
+                  new Map(prev).set(targetElementId, parsed.message)
+                );
+              } else if (parsed.event === "needs_clarification") {
+                const questions = parsed.questions as string[];
+                const context = parsed.context as string | undefined;
+
+                setGeneratingElements((prev) => {
+                  const next = new Set(prev);
+                  next.delete(targetElementId);
+                  return next;
+                });
+                setGenerationStatus((prev) => {
+                  const next = new Map(prev);
+                  next.delete(targetElementId);
+                  return next;
+                });
+
+                const questionText = context
+                  ? `${context}\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n")}`
+                  : questions.join("\n");
+
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: `🤔 ${questionText}` },
+                ]);
+
+                return { needsClarification: true, questions, targetElementId, targetContent };
+              } else if (parsed.event === "complete" && parsed.capability) {
+                setCapabilities((caps) => [
+                  ...caps,
+                  {
+                    elementId: targetElementId,
+                    trigger: parsed.capability.trigger || "click",
+                    code: parsed.capability.code,
+                  },
+                ]);
+
+                setGeneratingElements((prev) => {
+                  const next = new Set(prev);
+                  next.delete(targetElementId);
+                  return next;
+                });
+                setGenerationStatus((prev) => {
+                  const next = new Map(prev);
+                  next.delete(targetElementId);
+                  return next;
+                });
+
+                return parsed.capability;
+              } else if (parsed.event === "error") {
+                throw new Error(parsed.message);
+              }
+            } catch {
+              // Not valid JSON, skip
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Capability generation error:", error);
+      setGeneratingElements((prev) => {
+        const next = new Set(prev);
+        next.delete(targetElementId);
+        return next;
+      });
+      setGenerationStatus((prev) => {
+        const next = new Map(prev);
+        next.delete(targetElementId);
+        return next;
+      });
+      throw error;
+    }
+  }, [setCapabilities, setGeneratingElements, setGenerationStatus]);
+
+  // Handle form submit
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
@@ -572,18 +601,120 @@ export default function CanvasPage() {
     setInput("");
     setIsLoading(true);
 
-    // Detect if user is asking for realistic image generation
-    const realisticKeywords = ["realistic", "real", "actual", "photo", "image", "generate"];
-    const isRequestingImage = realisticKeywords.some((kw) =>
-      userMessage.toLowerCase().includes(kw)
-    );
+    // Check if user is answering a clarification question
+    if (pendingClarification) {
+      const { originalPrompt, targetElementId, targetContent } = pendingClarification;
+      setPendingClarification(null);
 
-    // If requesting image, show loading on last element or all matching elements
-    if (isRequestingImage && elements.length > 0) {
-      const lastElement = elements[elements.length - 1];
-      setGeneratingElements(new Set([lastElement.id]));
+      generateCapabilityWithProgress(
+        originalPrompt,
+        targetElementId,
+        targetContent,
+        elements,
+        [...messages, { role: "user", content: userMessage }],
+        userMessage
+      )
+        .then((result) => {
+          if (result && !("needsClarification" in result)) {
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: "✨ Done! Click it to try!" },
+            ]);
+          } else if (result && "needsClarification" in result) {
+            setPendingClarification({
+              originalPrompt,
+              targetElementId,
+              targetContent,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("Capability generation failed:", err);
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: "Something went wrong. Try again?" },
+          ]);
+        });
+
+      setIsLoading(false);
+      return;
     }
 
+    // Detect if requesting interactive capability
+    const capabilityKeywords = [
+      "game", "interactive", "click", "tracker", "app", "when i click",
+      "when you click", "counter", "list", "workout", "timer", "clicker"
+    ];
+    const isRequestingCapability = capabilityKeywords.some((kw) =>
+      userMessage.toLowerCase().includes(kw)
+    ) && elements.length > 0;
+
+    // Show loading bar on any element that's referenced in the message
+    const msgLower = userMessage.toLowerCase();
+    const imageElements = elements.filter(el => el.type === "image");
+
+    // Find element that's mentioned by name/description
+    const referencedElement = imageElements.find(el =>
+      el.description && msgLower.includes(el.description.toLowerCase())
+    );
+
+    if (referencedElement) {
+      // Message mentions a specific element - show loading on it
+      setGeneratingElements(new Set([referencedElement.id]));
+    } else if (elements.length > 0) {
+      // Check for keywords that imply working on existing elements
+      const editKeywords = ["give it", "give the", "make it", "make the", "change it", "change the", "edit", "modify", "turn it", "turn the", "to it", "on it"];
+      const isEditingLast = editKeywords.some((kw) => msgLower.includes(kw));
+
+      if (isEditingLast) {
+        const lastImage = [...elements].reverse().find(el => el.type === "image");
+        if (lastImage) {
+          setGeneratingElements(new Set([lastImage.id]));
+        }
+      }
+    }
+
+    if (isRequestingCapability) {
+      const lastElement = elements[elements.length - 1];
+
+      generateCapabilityWithProgress(
+        userMessage,
+        lastElement.id,
+        lastElement.content,
+        elements,
+        messages
+      )
+        .then((result) => {
+          if (result && !("needsClarification" in result)) {
+            setMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: "✨ Done! Click it to try!" },
+            ]);
+          } else if (result && "needsClarification" in result) {
+            setPendingClarification({
+              originalPrompt: userMessage,
+              targetElementId: lastElement.id,
+              targetContent: lastElement.content,
+            });
+          }
+        })
+        .catch((err) => {
+          console.error("Background capability generation failed:", err);
+          setMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: "Generation failed. Try again?" },
+          ]);
+        });
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: "Working on it! You can keep chatting while I build this..." },
+      ]);
+      setIsLoading(false);
+      return;
+    }
+
+    // Standard flow
     try {
       const response = await fetch("/api/canvas/execute", {
         method: "POST",
@@ -592,6 +723,7 @@ export default function CanvasPage() {
           message: userMessage,
           history: messages,
           currentElements: elements,
+          googleAccessToken: googleAuth?.accessToken,
         }),
       });
 
@@ -600,6 +732,12 @@ export default function CanvasPage() {
 
         if (data.actions && data.actions.length > 0) {
           processActions(data.actions);
+
+          // Handle finish action
+          const finishAction = data.actions.find((a: { type: string }) => a.type === "finish");
+          if (finishAction) {
+            setTimeout(() => saveRoom(finishAction.data.roomName), 1000);
+          }
         }
 
         if (data.response) {
@@ -608,6 +746,9 @@ export default function CanvasPage() {
             { role: "assistant", content: data.response },
           ]);
         }
+
+        // Clear any remaining generating state as safety net
+        setGeneratingElements(new Set());
       }
     } catch (error) {
       console.error("Failed to process:", error);
@@ -615,495 +756,90 @@ export default function CanvasPage() {
         ...prev,
         { role: "assistant", content: "Something went wrong. Try again?" },
       ]);
-      // Clear generating state on error
       setGeneratingElements(new Set());
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const getAnimationClass = (animation?: string, isDragging?: boolean) => {
-    if (isDragging) return ""; // No animation while dragging
-    switch (animation) {
-      case "float":
-        return "animate-bounce";
-      case "pulse":
-        return "animate-pulse";
-      case "spin":
-        return "animate-spin";
-      case "bounce":
-        return "animate-bounce";
-      default:
-        return "";
-    }
-  };
-
-  const handleDragStart = (e: React.MouseEvent | React.TouchEvent, elementId: string) => {
-    const el = elements.find((e) => e.id === elementId);
-    if (!el || el.draggable === false) return;
-
-    e.preventDefault();
-    setDraggedElement(elementId);
-    setDidDrag(false); // Reset drag flag on start
-
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-
-    if (canvasRef.current) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const elementX = (el.position.x / 100) * rect.width;
-      const elementY = (el.position.y / 100) * rect.height;
-      setDragOffset({
-        x: clientX - rect.left - elementX,
-        y: clientY - rect.top - elementY,
-      });
-    }
-  };
-
-  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!draggedElement || !canvasRef.current) return;
-
-    setDidDrag(true); // User is actually dragging
-
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-
-    const rect = canvasRef.current.getBoundingClientRect();
-    const newX = ((clientX - rect.left - dragOffset.x) / rect.width) * 100;
-    const newY = ((clientY - rect.top - dragOffset.y) / rect.height) * 100;
-
-    setElements((prev) =>
-      prev.map((el) =>
-        el.id === draggedElement
-          ? {
-              ...el,
-              position: {
-                x: Math.max(0, Math.min(100, newX)),
-                y: Math.max(0, Math.min(100, newY)),
-              },
-            }
-          : el
-      )
-    );
-  };
-
-  const handleDragEnd = () => {
-    setDraggedElement(null);
-  };
-
-  const renderElement = (el: SceneElement) => {
-    const isDragging = draggedElement === el.id;
-    const canDrag = el.draggable !== false;
-    const hasClickCapability = capabilities.some((c) => c.elementId === el.id && c.trigger === "click");
-    const isGenerating = generatingElements.has(el.id);
-
-    const baseStyle: React.CSSProperties = {
-      left: `${el.position.x}%`,
-      top: `${el.position.y}%`,
-      fontSize: `${el.size}px`,
-      color: el.color,
-      opacity: el.opacity ?? 1,
-      transform: el.rotation ? `rotate(${el.rotation}deg)` : undefined,
-      // Draggable + clickable = grab cursor, clickable only = pointer, draggable only = grab
-      cursor: isDragging ? "grabbing" : canDrag ? "grab" : hasClickCapability ? "pointer" : "default",
-      userSelect: "none",
-      zIndex: isDragging ? 1000 : 1,
-    };
-
-    const handleElementClick = (e: React.MouseEvent) => {
-      // Only trigger click capability if user didn't drag
-      if (hasClickCapability && !didDrag) {
-        e.stopPropagation();
-        executeCapability(el.id, "click", e);
-      }
-    };
-
-    const dragProps = canDrag
-      ? {
-          onMouseDown: (e: React.MouseEvent) => {
-            handleDragStart(e, el.id);
-          },
-          onTouchStart: (e: React.TouchEvent) => {
-            handleDragStart(e, el.id);
-          },
-          onClick: handleElementClick,
-        }
-      : { onClick: handleElementClick };
-
-    if (el.type === "emoji") {
-      return (
-        <div
-          key={el.id}
-          className={`absolute transition-all ${isDragging ? "duration-0" : "duration-300"} ${getAnimationClass(el.animation, isDragging)}`}
-          style={baseStyle}
-          {...dragProps}
-        >
-          {el.content}
-          {/* Retro loading bar overlay */}
-          {isGenerating && (
-            <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1">
-              <div className="w-16 h-2 border border-[#33ff00] bg-[#0a0a0a]">
-                <div
-                  className="h-full bg-[#33ff00] animate-[loading_2s_ease-in-out_infinite]"
-                  style={{
-                    boxShadow: "0 0 8px #33ff00",
-                  }}
-                />
-              </div>
-              <span
-                className="text-[8px] text-[#33ff00] font-mono tracking-wider"
-                style={{ textShadow: "0 0 5px rgba(51, 255, 0, 0.5)" }}
-              >
-                GENERATING
-              </span>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    if (el.type === "image") {
-      return (
-        <div
-          key={el.id}
-          className={`absolute transition-all ${isDragging ? "duration-0" : "duration-300"} ${getAnimationClass(el.animation, isDragging)}`}
-          style={{
-            left: `${el.position.x}%`,
-            top: `${el.position.y}%`,
-            width: `${el.size}px`,
-            height: `${el.size}px`,
-            opacity: el.opacity ?? 1,
-            transform: el.rotation ? `rotate(${el.rotation}deg) translate(-50%, -50%)` : "translate(-50%, -50%)",
-            cursor: isDragging ? "grabbing" : canDrag ? "grab" : hasClickCapability ? "pointer" : "default",
-            userSelect: "none",
-            zIndex: isDragging ? 1000 : 1,
-          }}
-          {...dragProps}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={el.content}
-            alt="Generated image"
-            className="w-full h-full object-contain pointer-events-none"
-            style={{
-              filter: `drop-shadow(0 0 10px rgba(51, 255, 0, 0.3))`,
-            }}
-          />
-        </div>
-      );
-    }
-
-    if (el.type === "text") {
-      return (
-        <div
-          key={el.id}
-          className={`absolute font-mono font-bold transition-all ${isDragging ? "duration-0" : "duration-300"} ${getAnimationClass(el.animation, isDragging)}`}
-          style={{
-            ...baseStyle,
-            textShadow: `0 0 ${el.size / 4}px ${el.color}`,
-          }}
-          {...dragProps}
-        >
-          {el.content}
-        </div>
-      );
-    }
-
-    if (el.type === "shape") {
-      const shapeSize = el.size;
-      const shapeStyle: React.CSSProperties = {
-        left: `${el.position.x}%`,
-        top: `${el.position.y}%`,
-        width: `${shapeSize}px`,
-        height: `${shapeSize}px`,
-        borderColor: el.color,
-        boxShadow: `0 0 ${shapeSize / 2}px ${el.color}40`,
-        cursor: canDrag ? (isDragging ? "grabbing" : "grab") : "default",
-        userSelect: "none",
-        zIndex: isDragging ? 1000 : 1,
-      };
-
-      if (el.content === "circle") {
-        return (
-          <div
-            key={el.id}
-            className={`absolute border-2 rounded-full transition-all ${isDragging ? "duration-0" : "duration-300"} ${getAnimationClass(el.animation, isDragging)}`}
-            style={shapeStyle}
-            {...dragProps}
-          />
-        );
-      }
-
-      if (el.content === "triangle") {
-        return (
-          <div
-            key={el.id}
-            className={`absolute transition-all ${isDragging ? "duration-0" : "duration-300"} ${getAnimationClass(el.animation, isDragging)}`}
-            style={{
-              left: `${el.position.x}%`,
-              top: `${el.position.y}%`,
-              width: 0,
-              height: 0,
-              borderLeft: `${shapeSize / 2}px solid transparent`,
-              borderRight: `${shapeSize / 2}px solid transparent`,
-              borderBottom: `${shapeSize}px solid ${el.color}`,
-              filter: `drop-shadow(0 0 ${shapeSize / 4}px ${el.color})`,
-              cursor: canDrag ? (isDragging ? "grabbing" : "grab") : "default",
-              userSelect: "none",
-              zIndex: isDragging ? 1000 : 1,
-            }}
-            {...dragProps}
-          />
-        );
-      }
-
-      // Default square
-      return (
-        <div
-          key={el.id}
-          className={`absolute border-2 transition-all ${isDragging ? "duration-0" : "duration-300"} ${getAnimationClass(el.animation, isDragging)}`}
-          style={shapeStyle}
-          {...dragProps}
-        />
-      );
-    }
-
-    return null;
-  };
+  }, [input, isLoading, pendingClarification, elements, messages, googleAuth, generateCapabilityWithProgress, processActions, saveRoom, setGeneratingElements]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] font-mono overflow-hidden">
-      {/* CRT Scanlines */}
-      <div
-        className="fixed inset-0 pointer-events-none z-50 opacity-[0.03]"
-        style={{
-          background:
-            "repeating-linear-gradient(0deg, transparent, transparent 1px, rgba(0,0,0,0.3) 1px, rgba(0,0,0,0.3) 2px)",
-        }}
+      <Background
+        background={background}
+        isBackgroundGenerating={isBackgroundGenerating}
       />
 
-      {/* Dynamic Background */}
-      {background.type === "grid" && (
-        <div
-          className="fixed inset-0 pointer-events-none transition-all duration-500"
-          style={{
-            backgroundImage: `linear-gradient(${background.color} 1px, transparent 1px), linear-gradient(90deg, ${background.color} 1px, transparent 1px)`,
-            backgroundSize: `${background.size}px ${background.size}px`,
-            opacity: background.opacity,
-          }}
-        />
-      )}
-      {background.type === "dots" && (
-        <div
-          className="fixed inset-0 pointer-events-none transition-all duration-500"
-          style={{
-            backgroundImage: `radial-gradient(circle, ${background.color} 1px, transparent 1px)`,
-            backgroundSize: `${background.size}px ${background.size}px`,
-            opacity: background.opacity,
-          }}
-        />
-      )}
-      {background.type === "image" && background.imageUrl && (
-        <div
-          className="fixed inset-0 pointer-events-none transition-all duration-500"
-          style={{
-            backgroundImage: `url(${background.imageUrl})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            opacity: background.opacity,
-          }}
-        />
-      )}
+      <ControlBar
+        spotifyAuth={spotifyAuth}
+        spotifyTrack={spotifyTrack}
+        isSpotifyConnecting={isSpotifyConnecting}
+        onConnectSpotify={connectSpotify}
+        onFetchNowPlaying={() => spotifyAuth && fetchNowPlaying(spotifyAuth.accessToken)}
+        googleAuth={googleAuth}
+        isGoogleConnecting={isGoogleConnecting}
+        onConnectGoogle={connectGoogle}
+        createdRooms={createdRooms}
+        buildingRooms={buildingRooms}
+        onRemoveCreatedRoom={removeCreatedRoom}
+        onOpenOnboarding={() => setIsOnboardingOpen(true)}
+      />
 
-      {/* Background Loading Animation */}
-      {isBackgroundGenerating && (
-        <div className="fixed inset-0 pointer-events-none z-[5] flex items-center justify-center">
-          <div className="flex flex-col items-center gap-3">
-            <div className="w-32 h-3 border border-[#33ff00] bg-[#0a0a0a]">
-              <div
-                className="h-full bg-[#33ff00] animate-[loading_2s_ease-in-out_infinite]"
-                style={{
-                  boxShadow: "0 0 12px #33ff00",
-                }}
-              />
-            </div>
-            <span
-              className="text-[10px] text-[#33ff00] font-mono tracking-wider"
-              style={{ textShadow: "0 0 5px rgba(51, 255, 0, 0.5)" }}
-            >
-              GENERATING BACKGROUND
-            </span>
-          </div>
-        </div>
-      )}
+      <CanvasArea
+        elements={elements}
+        setElements={setElements}
+        generatingElements={generatingElements}
+        onExecuteCapability={executeCapability}
+      />
 
-      {/* Top Right Buttons */}
-      <div className="fixed top-4 right-4 z-30 flex flex-col gap-2">
-        {/* Steve Jobs Room Button */}
-        <button
-          onClick={() => router.push("/room/learn/steve-jobs-room")}
-          className="px-3 py-1.5 text-[10px] font-mono border border-[#ffb000]/40 text-[#ffb000]/60 hover:border-[#ffb000] hover:text-[#ffb000] hover:bg-[#ffb000]/10 transition-all"
-          style={{ textShadow: "0 0 5px rgba(255, 176, 0, 0.3)" }}
-        >
-          [TALK TO STEVE]
-        </button>
+      <PopupModal
+        popup={popup}
+        onClose={() => setPopup(null)}
+        onRegenerate={lastClickedElement ? () => triggerAIReaction(lastClickedElement.element, lastClickedElement.position) : undefined}
+        onSelectOption={handleOptionSelect}
+      />
 
-        {/* Cyberpunk Room Button */}
-        <button
-          onClick={() => router.push("/rooms/cyberpunk-kreuzberg/index.html")}
-          className="px-3 py-1.5 text-[10px] font-mono border border-[#00ffff]/40 text-[#00ffff]/60 hover:border-[#00ffff] hover:text-[#00ffff] hover:bg-[#00ffff]/10 transition-all"
-          style={{ textShadow: "0 0 5px rgba(0, 255, 255, 0.3)" }}
-        >
-          [CYBERPUNK DEN]
-        </button>
+      <ChatPanel
+        messages={messages}
+        input={input}
+        setInput={setInput}
+        isLoading={isLoading}
+        isListening={isListening}
+        onSubmit={handleSubmit}
+        onToggleListening={toggleListening}
+        isHelperMode={isHelperMode}
+        onCloseHelper={() => setIsHelperMode(false)}
+        inputRef={chatInputRef}
+      />
 
-        {/* Spotify Button */}
-        <button
-          onClick={spotifyAuth ? () => fetchNowPlaying(spotifyAuth.accessToken) : connectSpotify}
-          disabled={isSpotifyConnecting}
-          className={`px-3 py-1.5 text-[10px] font-mono border transition-all ${
-            spotifyAuth
-              ? "border-[#1DB954] text-[#1DB954] hover:bg-[#1DB954]/10"
-              : "border-[#33ff00]/40 text-[#33ff00]/60 hover:border-[#33ff00] hover:text-[#33ff00]"
-          } ${isSpotifyConnecting ? "opacity-50 cursor-wait" : ""}`}
-          style={{
-            textShadow: spotifyAuth ? "0 0 5px rgba(29, 185, 84, 0.5)" : "0 0 5px rgba(51, 255, 0, 0.3)",
-          }}
-        >
-          {isSpotifyConnecting ? "[CONNECTING...]" : spotifyAuth ? "[SPOTIFY: ON]" : "[SPOTIFY: OFF]"}
-        </button>
-        {/* Now Playing Display */}
-        {spotifyAuth && spotifyTrack && (
-          <div
-            className="mt-2 px-3 py-2 border border-[#1DB954]/40 bg-[#0a0a0a]/90 max-w-[200px]"
-            style={{ textShadow: "0 0 5px rgba(29, 185, 84, 0.3)" }}
-          >
-            <div className="flex items-center gap-2">
-              {spotifyTrack.albumArt && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={spotifyTrack.albumArt}
-                  alt="Album art"
-                  className="w-10 h-10 object-cover"
-                  style={{ filter: "drop-shadow(0 0 5px rgba(29, 185, 84, 0.3))" }}
-                />
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[#1DB954] text-[10px] font-mono truncate">{spotifyTrack.name}</p>
-                <p className="text-[#1DB954]/60 text-[8px] font-mono truncate">{spotifyTrack.artist}</p>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+      <StoryPlayer
+        isOpen={isStoryMode}
+        onClose={() => setIsStoryMode(false)}
+      />
 
-      {/* Dynamic Elements */}
-      <div
-        ref={canvasRef}
-        className="fixed inset-0 z-10"
-        onMouseMove={handleDragMove}
-        onMouseUp={handleDragEnd}
-        onMouseLeave={handleDragEnd}
-        onTouchMove={handleDragMove}
-        onTouchEnd={handleDragEnd}
-      >
-        {elements.map(renderElement)}
-      </div>
+      <OneThingModal
+        isOpen={isOneThingMode}
+        onClose={() => {
+          setIsOneThingMode(false);
+          setOneThingPosition(null);
+        }}
+        position={oneThingPosition ?? undefined}
+        todos={oneThingTodos}
+        onAddTodo={addOneThingTodo}
+        onToggleTodo={toggleOneThingTodo}
+        onRemoveTodo={removeOneThingTodo}
+        onClearCompleted={clearOneThingCompleted}
+      />
 
-      {/* Popup Modal */}
-      {popup && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-          onClick={() => setPopup(null)}
-        >
-          <div className="max-w-md p-6 border border-[#33ff00]/40 bg-[#0a0a0a]/95">
-            {popup.type === "text" && (
-              <p className="text-[#33ff00] text-lg font-mono" style={{ textShadow: "0 0 10px rgba(51, 255, 0, 0.5)" }}>
-                {popup.content}
-              </p>
-            )}
-            {popup.type === "image" && (
-              <div className="text-center">
-                <span className="text-6xl">{popup.content}</span>
-              </div>
-            )}
-            <p className="text-[#33ff00]/50 text-xs mt-4 text-center">[click to close]</p>
-          </div>
-        </div>
-      )}
+      <OneThingOverlay
+        elements={elements}
+        firstPendingTodo={firstPendingTodo}
+        pendingCount={pendingCount}
+      />
 
-      {/* Chat Container - Bottom Center */}
-      <div className="fixed bottom-20 left-0 right-0 z-20 px-4">
-        <div className="max-w-xl mx-auto">
-          {/* Messages */}
-          <div className="max-h-48 overflow-y-auto mb-3 space-y-2 px-1">
-            {messages.map((msg, i) => (
-              <div
-                key={i}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] px-3 py-2 text-xs ${
-                    msg.role === "user"
-                      ? "bg-[#33ff00] text-[#0a0a0a]"
-                      : "border border-[#33ff00]/40 text-[#33ff00]"
-                  }`}
-                  style={{
-                    textShadow:
-                      msg.role === "assistant"
-                        ? "0 0 5px rgba(51, 255, 0, 0.3)"
-                        : "none",
-                  }}
-                >
-                  {msg.content}
-                </div>
-              </div>
-            ))}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="border border-[#33ff00]/40 px-3 py-2">
-                  <span className="text-[#33ff00] text-xs animate-pulse">
-                    [...]
-                  </span>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input */}
-          <form onSubmit={handleSubmit}>
-            <div className="border border-[#33ff00]/40 bg-[#0a0a0a]/90 backdrop-blur-sm">
-              <div className="flex items-center">
-                <span
-                  className="text-[#33ff00] pl-3 text-sm"
-                  style={{ textShadow: "0 0 5px rgba(51, 255, 0, 0.5)" }}
-                >
-                  &gt;
-                </span>
-                <input
-                  ref={inputRef}
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  placeholder="Describe what you want to see..."
-                  disabled={isLoading}
-                  className="flex-1 bg-transparent px-2 py-3 text-[#33ff00] text-sm outline-none placeholder-[#33ff00]/30"
-                  style={{ textShadow: "0 0 5px rgba(51, 255, 0, 0.3)" }}
-                />
-                <button
-                  type="submit"
-                  disabled={isLoading || !input.trim()}
-                  className="px-3 py-3 text-[#33ff00] text-xs hover:bg-[#33ff00]/10 disabled:opacity-30 transition-colors"
-                  style={{ textShadow: "0 0 5px rgba(51, 255, 0, 0.5)" }}
-                >
-                  [SEND]
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      </div>
+      <OnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+      />
     </div>
   );
 }
